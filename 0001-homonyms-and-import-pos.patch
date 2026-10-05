@@ -1,0 +1,322 @@
+From 6afc7de399b74e5576bd2be61713e79c880e0e67 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 5 Oct 2026 10:47:05 +0000
+Subject: [PATCH] Allow Korean homonyms; tolerate part-of-speech labels in
+ imports
+
+- migrations/0002: unique on the (ko_norm, bg_norm) pair instead of ko_norm alone
+- server: ON CONFLICT on the pair; duplicate message names the pair
+- practice: typing another meaning of the same prompt asks you to try again
+  instead of counting as wrong; feedback lists the other meanings
+- import: part of speech accepted in English, Bulgarian or Korean; unknown
+  labels are left empty and reported instead of failing the batch
+- tests for sharesAlternative and parsePos; README notes
+---
+ README.md                       |  7 ++++++-
+ migrations/0002_unique_pair.sql |  6 ++++++
+ server/app.ts                   |  4 ++--
+ shared/lang.ts                  | 33 +++++++++++++++++++++++++++++++++
+ src/views/practice.ts           | 26 ++++++++++++++++++++++++--
+ src/views/words.ts              | 24 ++++++++++++++++--------
+ tests/lang.test.ts              | 29 ++++++++++++++++++++++++++++-
+ 7 files changed, 115 insertions(+), 14 deletions(-)
+ create mode 100644 migrations/0002_unique_pair.sql
+
+diff --git a/README.md b/README.md
+index 3f8664d..f6f8fa2 100644
+--- a/README.md
++++ b/README.md
+@@ -89,9 +89,14 @@ The deploy job applies any new migrations, then publishes the site.
+ - Bulgarian verbs in the 1st person singular, with aspect pairs as `казвам / кажа`.
+   Korean verbs and adjectives in dictionary form (`말하다`).
+ - Separate accepted alternatives with `;` — `감사합니다; 고마워요`. Either one counts as correct.
++- Homonyms are separate entries: `배 = круша`, `배 = кораб`, `배 = корем`. Only the exact same
++  pair is rejected as a duplicate. In practice, typing another meaning of the same word isn't
++  counted as wrong; the app tells you it's a different card and lets you try again.
+ - Romanization is filled in automatically and can be edited.
+ - Import: one pair per line as `къща = 집`, or paste spreadsheet rows (tab-separated):
+-  Bulgarian, Korean, romanization, hanja, part of speech, note, tags.
++  Bulgarian, Korean, romanization, hanja, part of speech, note, tags. Part of speech can be
++  written in English, Bulgarian or Korean (`noun`, `същ.`, `명사`); unrecognized labels are
++  left empty and listed after the import.
+ 
+ ## How practice works
+ 
+diff --git a/migrations/0002_unique_pair.sql b/migrations/0002_unique_pair.sql
+new file mode 100644
+index 0000000..22fdd0d
+--- /dev/null
++++ b/migrations/0002_unique_pair.sql
+@@ -0,0 +1,6 @@
++-- Allow Korean homonyms: 배 = круша, 배 = кораб and 배 = корем are separate entries.
++-- Only the exact same Bulgarian–Korean pair counts as a duplicate now.
++
++DROP INDEX idx_entries_ko;
++CREATE UNIQUE INDEX idx_entries_pair ON entries(ko_norm, bg_norm);
++CREATE INDEX idx_entries_ko ON entries(ko_norm);
+diff --git a/server/app.ts b/server/app.ts
+index e4d823c..4247297 100644
+--- a/server/app.ts
++++ b/server/app.ts
+@@ -109,7 +109,7 @@ const COLUMNS = [
+ app.onError((err, c) => {
+   if (err instanceof InputError) return c.json({ error: err.message }, 400);
+   if (String(err).includes('UNIQUE constraint failed')) {
+-    return c.json({ error: 'That Korean word is already in your vocabulary.' }, 409);
++    return c.json({ error: 'That Bulgarian–Korean pair is already in your vocabulary.' }, 409);
+   }
+   console.error(err);
+   return c.json({ error: 'Server error. Check the Worker logs.' }, 500);
+@@ -135,7 +135,7 @@ app.post('/entries', async (c) => {
+ 
+   const sql = `INSERT INTO entries (${COLUMNS.join(', ')})
+                VALUES (${COLUMNS.map(() => '?').join(', ')})
+-               ON CONFLICT(ko_norm) DO NOTHING
++               ON CONFLICT(ko_norm, bg_norm) DO NOTHING
+                RETURNING *`;
+   const stmt = c.env.DB.prepare(sql);
+   const results = await c.env.DB.batch<Entry>(rows.map((r) => stmt.bind(...COLUMNS.map((k) => r[k]))));
+diff --git a/shared/lang.ts b/shared/lang.ts
+index 594926c..09ae5a6 100644
+--- a/shared/lang.ts
++++ b/shared/lang.ts
+@@ -1,4 +1,5 @@
+ import { romanize } from 'es-hangul';
++import type { PartOfSpeech } from './types';
+ 
+ export type Lang = 'bg' | 'ko';
+ 
+@@ -76,6 +77,15 @@ export function suggestRomanization(koText: string): string {
+     .join('; ');
+ }
+ 
++/**
++ * True when two normalized columns (bg_norm or ko_norm) share any alternative,
++ * e.g. the ko_norm of 배 = круша and 배 = кораб.
++ */
++export function sharesAlternative(aNorm: string, bNorm: string): boolean {
++  const a = new Set(aNorm.split('|'));
++  return bNorm.split('|').some((alt) => a.has(alt));
++}
++
+ /** Columns the server stores alongside the user's text. */
+ export function deriveColumns(bgText: string, koText: string) {
+   const ko = splitAlternatives(koText);
+@@ -171,3 +181,26 @@ export function hint(expected: string, lang: Lang, level: 1 | 2): string {
+     .join(' ')
+     .replace(/ {3,}/g, '   ');
+ }
++
++// ---------------------------------------------------------------------------
++// Part of speech from imported spreadsheets
++// ---------------------------------------------------------------------------
++
++const POS_ALIASES: Record<string, PartOfSpeech> = {
++  noun: 'noun', n: 'noun', съществително: 'noun', същ: 'noun', съществ: 'noun', 명사: 'noun',
++  verb: 'verb', v: 'verb', глагол: 'verb', гл: 'verb', 동사: 'verb',
++  adjective: 'adjective', adj: 'adjective', прилагателно: 'adjective', прил: 'adjective', 형용사: 'adjective',
++  adverb: 'adverb', adv: 'adverb', наречие: 'adverb', нар: 'adverb', 부사: 'adverb',
++  phrase: 'phrase', expression: 'phrase', израз: 'phrase', фраза: 'phrase', 표현: 'phrase',
++  other: 'other', друго: 'other', 기타: 'other',
++};
++
++/**
++ * Accepts English, Bulgarian or Korean labels and common abbreviations
++ * ('Noun', 'същ.', '동사'). Returns null for empty or unrecognized input.
++ */
++export function parsePos(raw: string | null | undefined): PartOfSpeech | null {
++  if (!raw) return null;
++  const key = raw.trim().toLocaleLowerCase('bg').replace(/\.$/, '');
++  return POS_ALIASES[key] ?? null;
++}
+diff --git a/src/views/practice.ts b/src/views/practice.ts
+index 84f1b56..e096a5c 100644
+--- a/src/views/practice.ts
++++ b/src/views/practice.ts
+@@ -1,4 +1,4 @@
+-import { checkAnswer, hint, type Lang } from '../../shared/lang';
++import { checkAnswer, hint, sharesAlternative, type Lang } from '../../shared/lang';
+ import type { AnswerResult, QuizCard, QuizDirection } from '../../shared/types';
+ import { api } from '../api';
+ import { h, trackImeEnter } from '../dom';
+@@ -139,12 +139,21 @@ export function renderPractice(root: HTMLElement): () => void {
+       const expected = toKo ? card.entry.ko_text : card.entry.bg_text;
+       let hintLevel = 0;
+ 
++      // Other entries with the same prompt (배 = круша / кораб / корем): typing one of
++      // those meanings is not a mistake, just a different card.
++      const promptNorm = toKo ? card.entry.bg_norm : card.entry.ko_norm;
++      const otherMeanings = store.entries.filter(
++        (e) => e.id !== card.entry.id && sharesAlternative(toKo ? e.bg_norm : e.ko_norm, promptNorm),
++      );
++      const otherText = (e: typeof card.entry) => (toKo ? e.ko_text : e.bg_text);
++
+       const meta = [
+         toKo ? POS_BG[card.entry.pos ?? ''] : null,
+         toKo && card.entry.bg_gender ? `${card.entry.bg_gender}. р.` : null,
+       ].filter(Boolean).join(', ');
+ 
+       const hintLine = h('p', { class: 'hint', lang: answerLang, 'aria-live': 'polite' });
++      const otherNotice = h('p', { class: 'status', role: 'status' });
+       const input = h('input', {
+         class: 'answer',
+         lang: answerLang,
+@@ -160,13 +169,21 @@ export function renderPractice(root: HTMLElement): () => void {
+       const giveUp = h('button', { type: 'button', onclick: () => reveal('wrong', null) }, "Don't know");
+ 
+       const form = h('form', { class: 'answer-form' },
+-        input, hintLine, h('div', { class: 'actions' }, checkBtn, hintBtn, giveUp),
++        input, hintLine, otherNotice, h('div', { class: 'actions' }, checkBtn, hintBtn, giveUp),
+       );
+       const imeEnter = trackImeEnter(form);
+       form.addEventListener('submit', (e) => {
+         e.preventDefault();
+         if (imeEnter() || !input.value.trim()) return;
+         const verdict = checkAnswer(input.value, expected, answerLang);
++        if (verdict.verdict !== 'correct') {
++          const other = otherMeanings.find((o) => checkAnswer(input.value, otherText(o), answerLang).verdict === 'correct');
++          if (other) {
++            otherNotice.textContent = `${otherText(other)} is another meaning of ${promptText}. This card asks for a different one — try again.`;
++            input.select();
++            return;
++          }
++        }
+         if (verdict.verdict === 'correct') reveal(hintLevel ? 'hinted' : 'correct', null);
+         else if (verdict.verdict === 'close') reveal(null, verdict.matched);
+         else reveal('wrong', null);
+@@ -205,6 +222,10 @@ export function renderPractice(root: HTMLElement): () => void {
+           h('p', { lang: 'bg', class: 'bg' }, e.bg_text, e.bg_gender ? ` (${e.bg_gender}.)` : ''),
+           closeTo && typed ? h('p', { class: 'typed' }, 'You wrote: ', h('span', { lang: answerLang }, typed)) : null,
+           e.note ? h('p', { class: 'note' }, e.note) : null,
++          otherMeanings.length
++            ? h('p', { class: 'note' }, 'Other meanings: ',
++                h('span', { lang: answerLang }, otherMeanings.map(otherText).join(', ')))
++            : null,
+           speakButton(e.ko_text, 'ko'),
+         );
+ 
+@@ -234,6 +255,7 @@ export function renderPractice(root: HTMLElement): () => void {
+         h('p', { class: 'direction' }, DIRECTION_LABELS[card.direction]),
+         h('p', { class: 'prompt', lang: promptLang }, promptText),
+         meta ? h('p', { class: 'meta', lang: 'bg' }, meta) : null,
++        otherMeanings.length ? h('p', { class: 'meta' }, `One of ${otherMeanings.length + 1} meanings in your list`) : null,
+         !toKo ? speakButton(card.entry.ko_text, 'ko') : null,
+         form,
+       ));
+diff --git a/src/views/words.ts b/src/views/words.ts
+index 594fd3b..715ed5c 100644
+--- a/src/views/words.ts
++++ b/src/views/words.ts
+@@ -2,6 +2,7 @@ import {
+   isInitialsQuery,
+   normBg,
+   normKo,
++  parsePos,
+   suggestRomanization,
+ } from '../../shared/lang';
+ import {
+@@ -115,7 +116,7 @@ export function renderWords(root: HTMLElement): () => void {
+           setStatus(`Added ${input.bg_text} — ${input.ko_text}.`, 'ok');
+           resetForm(false, true);
+         } else {
+-          setStatus(`${input.ko_text} is already in your vocabulary.`, 'error');
++          setStatus(`${input.bg_text} — ${input.ko_text} is already in your vocabulary.`, 'error');
+         }
+       }
+     } catch (err) {
+@@ -251,24 +252,29 @@ export function renderWords(root: HTMLElement): () => void {
+   const importBtn = h('button', { type: 'button', class: 'primary', onclick: runImport }, 'Import words');
+   const importStatus = h('p', { class: 'status', role: 'status' });
+ 
+-  function parseImport(raw: string): EntryInput[] {
+-    return raw
++  /** Unrecognized part-of-speech labels are dropped (and reported) so one odd cell can't fail a batch. */
++  function parseImport(raw: string): { items: EntryInput[]; unknownPos: string[] } {
++    const unknownPos = new Set<string>();
++    const items = raw
+       .split('\n')
+       .map((line) => line.trim())
+       .filter(Boolean)
+-      .map((line) => {
++      .map((line): EntryInput => {
+         // Tab-separated (pasted from a spreadsheet): bg, ko, romanization, hanja, pos, note, tags
+         if (line.includes('\t')) {
+           const [bg_text, ko_text, ko_roman, hanja, p, note, t] = line.split('\t').map((c) => c.trim() || null);
+-          return { bg_text: bg_text ?? '', ko_text: ko_text ?? '', ko_roman, hanja, pos: p as EntryInput['pos'], note, tags: t ?? (importTags.value || null) };
++          const pos = parsePos(p);
++          if (p && !pos) unknownPos.add(p);
++          return { bg_text: bg_text ?? '', ko_text: ko_text ?? '', ko_roman, hanja, pos, note, tags: t ?? (importTags.value || null) };
+         }
+         const [bg_text, ko_text = ''] = line.split(/\s*=\s*/);
+         return { bg_text, ko_text, tags: importTags.value || null };
+       });
++    return { items, unknownPos: [...unknownPos] };
+   }
+ 
+   async function runImport() {
+-    const items = parseImport(importBox.value);
++    const { items, unknownPos } = parseImport(importBox.value);
+     const invalid = items.filter((i) => !i.bg_text.trim() || !i.ko_text.trim());
+     if (!items.length) return;
+     if (invalid.length) {
+@@ -285,11 +291,13 @@ export function renderWords(root: HTMLElement): () => void {
+         const res = await api.createEntries(items.slice(i, i + MAX_ENTRIES_PER_REQUEST));
+         store.upsert(...res.created);
+         created += res.created.length;
+-        skipped.push(...res.skipped.map((s) => s.ko_text));
++        skipped.push(...res.skipped.map((s) => `${s.bg_text} — ${s.ko_text}`));
+       }
+       importStatus.dataset.kind = 'ok';
+       importStatus.textContent =
+-        `Imported ${created} word(s).` + (skipped.length ? ` Skipped ${skipped.length} already in your vocabulary: ${skipped.join(', ')}.` : '');
++        `Imported ${created} word(s).` +
++        (skipped.length ? ` Skipped ${skipped.length} already in your vocabulary: ${skipped.join(', ')}.` : '') +
++        (unknownPos.length ? ` Part of speech left empty where it said: ${unknownPos.join(', ')}.` : '');
+       importBox.value = '';
+     } catch (err) {
+       importStatus.dataset.kind = 'error';
+diff --git a/tests/lang.test.ts b/tests/lang.test.ts
+index b72cb20..114e55f 100644
+--- a/tests/lang.test.ts
++++ b/tests/lang.test.ts
+@@ -1,5 +1,7 @@
+ import { describe, expect, it } from 'vitest';
+-import { checkAnswer, deriveColumns, hint, initials, normBg, normKo, splitAlternatives, suggestRomanization } from '../shared/lang';
++import {
++  checkAnswer, deriveColumns, hint, initials, normBg, normKo, parsePos, sharesAlternative, splitAlternatives, suggestRomanization,
++} from '../shared/lang';
+ 
+ describe('normalization', () => {
+   it('strips Bulgarian stress marks and case', () => {
+@@ -59,3 +61,28 @@ describe('hints', () => {
+     expect(hint('къща', 'bg', 2)).toBe('к ъ _ _');
+   });
+ });
++
++describe('homonyms', () => {
++  it('detects entries that share a Korean form', () => {
++    const pear = deriveColumns('круша', '배');
++    const boat = deriveColumns('кораб', '배; 선박');
++    const house = deriveColumns('къща', '집');
++    expect(sharesAlternative(pear.ko_norm, boat.ko_norm)).toBe(true);
++    expect(sharesAlternative(pear.ko_norm, house.ko_norm)).toBe(false);
++  });
++});
++
++describe('parsePos', () => {
++  it('accepts English, Bulgarian and Korean labels and abbreviations', () => {
++    expect(parsePos('Noun')).toBe('noun');
++    expect(parsePos('същ.')).toBe('noun');
++    expect(parsePos('Глагол')).toBe('verb');
++    expect(parsePos('형용사')).toBe('adjective');
++    expect(parsePos(' adv ')).toBe('adverb');
++  });
++  it('returns null for empty or unknown labels', () => {
++    expect(parsePos('')).toBeNull();
++    expect(parsePos(null)).toBeNull();
++    expect(parsePos('частица')).toBeNull();
++  });
++});
+-- 
+2.43.0
+

@@ -6,5 +6,5 @@ compatibility_date = "2026-09-01"
 binding = "DB"
 database_name = "bg-ko-vocab"
 # Replace with the id printed by: npx wrangler d1 create bg-ko-vocab
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "c3857d82-06b1-45fb-aa92-f89f033ddc5d"
 migrations_dir = "migrations"
