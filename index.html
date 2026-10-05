@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#2f6b5f" />
+    <title>Думи 단어</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&display=swap"
+    />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="wordmark" href="#/words"><span lang="bg">Думи</span> <span lang="ko">단어</span></a>
+      <nav aria-label="Main">
+        <a href="#/words" data-route="words">Words</a>
+        <a href="#/practice" data-route="practice">Practice</a>
+      </nav>
+    </header>
+    <p id="banner" class="banner" role="alert" hidden></p>
+    <main id="app"></main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

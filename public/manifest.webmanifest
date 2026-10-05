@@ -1,0 +1,9 @@
+{
+  "name": "Думи 단어",
+  "short_name": "Думи 단어",
+  "start_url": "/#/practice",
+  "display": "standalone",
+  "background_color": "#eef1f3",
+  "theme_color": "#2f6b5f",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

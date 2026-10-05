@@ -1,0 +1,2 @@
+# Copy to .dev.vars for local development. Never deploy with this set.
+DEV_BYPASS_AUTH=true

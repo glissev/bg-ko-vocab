@@ -1,0 +1,14 @@
+# dependencies and build output
+node_modules/
+dist/
+
+# local Cloudflare state and secrets
+.wrangler/
+.dev.vars
+.env*
+
+# editors and OS
+.DS_Store
+.vscode/
+.idea/
+*.log

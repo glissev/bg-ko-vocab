@@ -1,0 +1,33 @@
+{
+  "name": "bg-ko-vocab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal Bulgarian–Korean vocabulary trainer",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n web,api \"vite\" \"wrangler pages dev public --ip 127.0.0.1 --port 8788\"",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.worker.json",
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply bg-ko-vocab --local",
+    "db:migrate:remote": "wrangler d1 migrations apply bg-ko-vocab --remote",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name bg-ko-vocab"
+  },
+  "dependencies": {
+    "es-hangul": "^2.4.0",
+    "hono": "^4.13.13",
+    "idb-keyval": "^6.3.0",
+    "jose": "^6.2.12"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261005.1",
+    "concurrently": "^10.0.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3",
+    "wrangler": "^4.147.0"
+  }
+}
