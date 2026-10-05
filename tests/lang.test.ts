@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { checkAnswer, deriveColumns, hint, initials, normBg, normKo, splitAlternatives, suggestRomanization } from '../shared/lang';
+import {
+  checkAnswer, deriveColumns, hint, initials, normBg, normKo, parsePos, sharesAlternative, splitAlternatives, suggestRomanization,
+} from '../shared/lang';
 
 describe('normalization', () => {
   it('strips Bulgarian stress marks and case', () => {
@@ -57,5 +59,30 @@ describe('hints', () => {
   it('gives the first Bulgarian letter, then half the word', () => {
     expect(hint('къща', 'bg', 1)).toBe('к _ _ _');
     expect(hint('къща', 'bg', 2)).toBe('к ъ _ _');
+  });
+});
+
+describe('homonyms', () => {
+  it('detects entries that share a Korean form', () => {
+    const pear = deriveColumns('круша', '배');
+    const boat = deriveColumns('кораб', '배; 선박');
+    const house = deriveColumns('къща', '집');
+    expect(sharesAlternative(pear.ko_norm, boat.ko_norm)).toBe(true);
+    expect(sharesAlternative(pear.ko_norm, house.ko_norm)).toBe(false);
+  });
+});
+
+describe('parsePos', () => {
+  it('accepts English, Bulgarian and Korean labels and abbreviations', () => {
+    expect(parsePos('Noun')).toBe('noun');
+    expect(parsePos('същ.')).toBe('noun');
+    expect(parsePos('Глагол')).toBe('verb');
+    expect(parsePos('형용사')).toBe('adjective');
+    expect(parsePos(' adv ')).toBe('adverb');
+  });
+  it('returns null for empty or unknown labels', () => {
+    expect(parsePos('')).toBeNull();
+    expect(parsePos(null)).toBeNull();
+    expect(parsePos('частица')).toBeNull();
   });
 });

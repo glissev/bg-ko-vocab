@@ -2,6 +2,7 @@ import {
   isInitialsQuery,
   normBg,
   normKo,
+  parsePos,
   suggestRomanization,
 } from '../../shared/lang';
 import {
@@ -115,7 +116,7 @@ export function renderWords(root: HTMLElement): () => void {
           setStatus(`Added ${input.bg_text} — ${input.ko_text}.`, 'ok');
           resetForm(false, true);
         } else {
-          setStatus(`${input.ko_text} is already in your vocabulary.`, 'error');
+          setStatus(`${input.bg_text} — ${input.ko_text} is already in your vocabulary.`, 'error');
         }
       }
     } catch (err) {
@@ -251,24 +252,29 @@ export function renderWords(root: HTMLElement): () => void {
   const importBtn = h('button', { type: 'button', class: 'primary', onclick: runImport }, 'Import words');
   const importStatus = h('p', { class: 'status', role: 'status' });
 
-  function parseImport(raw: string): EntryInput[] {
-    return raw
+  /** Unrecognized part-of-speech labels are dropped (and reported) so one odd cell can't fail a batch. */
+  function parseImport(raw: string): { items: EntryInput[]; unknownPos: string[] } {
+    const unknownPos = new Set<string>();
+    const items = raw
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
-      .map((line) => {
+      .map((line): EntryInput => {
         // Tab-separated (pasted from a spreadsheet): bg, ko, romanization, hanja, pos, note, tags
         if (line.includes('\t')) {
           const [bg_text, ko_text, ko_roman, hanja, p, note, t] = line.split('\t').map((c) => c.trim() || null);
-          return { bg_text: bg_text ?? '', ko_text: ko_text ?? '', ko_roman, hanja, pos: p as EntryInput['pos'], note, tags: t ?? (importTags.value || null) };
+          const pos = parsePos(p);
+          if (p && !pos) unknownPos.add(p);
+          return { bg_text: bg_text ?? '', ko_text: ko_text ?? '', ko_roman, hanja, pos, note, tags: t ?? (importTags.value || null) };
         }
         const [bg_text, ko_text = ''] = line.split(/\s*=\s*/);
         return { bg_text, ko_text, tags: importTags.value || null };
       });
+    return { items, unknownPos: [...unknownPos] };
   }
 
   async function runImport() {
-    const items = parseImport(importBox.value);
+    const { items, unknownPos } = parseImport(importBox.value);
     const invalid = items.filter((i) => !i.bg_text.trim() || !i.ko_text.trim());
     if (!items.length) return;
     if (invalid.length) {
@@ -285,11 +291,13 @@ export function renderWords(root: HTMLElement): () => void {
         const res = await api.createEntries(items.slice(i, i + MAX_ENTRIES_PER_REQUEST));
         store.upsert(...res.created);
         created += res.created.length;
-        skipped.push(...res.skipped.map((s) => s.ko_text));
+        skipped.push(...res.skipped.map((s) => `${s.bg_text} — ${s.ko_text}`));
       }
       importStatus.dataset.kind = 'ok';
       importStatus.textContent =
-        `Imported ${created} word(s).` + (skipped.length ? ` Skipped ${skipped.length} already in your vocabulary: ${skipped.join(', ')}.` : '');
+        `Imported ${created} word(s).` +
+        (skipped.length ? ` Skipped ${skipped.length} already in your vocabulary: ${skipped.join(', ')}.` : '') +
+        (unknownPos.length ? ` Part of speech left empty where it said: ${unknownPos.join(', ')}.` : '');
       importBox.value = '';
     } catch (err) {
       importStatus.dataset.kind = 'error';

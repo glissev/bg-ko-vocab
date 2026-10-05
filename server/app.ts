@@ -109,7 +109,7 @@ const COLUMNS = [
 app.onError((err, c) => {
   if (err instanceof InputError) return c.json({ error: err.message }, 400);
   if (String(err).includes('UNIQUE constraint failed')) {
-    return c.json({ error: 'That Korean word is already in your vocabulary.' }, 409);
+    return c.json({ error: 'That Bulgarian–Korean pair is already in your vocabulary.' }, 409);
   }
   console.error(err);
   return c.json({ error: 'Server error. Check the Worker logs.' }, 500);
@@ -135,7 +135,7 @@ app.post('/entries', async (c) => {
 
   const sql = `INSERT INTO entries (${COLUMNS.join(', ')})
                VALUES (${COLUMNS.map(() => '?').join(', ')})
-               ON CONFLICT(ko_norm) DO NOTHING
+               ON CONFLICT(ko_norm, bg_norm) DO NOTHING
                RETURNING *`;
   const stmt = c.env.DB.prepare(sql);
   const results = await c.env.DB.batch<Entry>(rows.map((r) => stmt.bind(...COLUMNS.map((k) => r[k]))));

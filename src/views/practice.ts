@@ -1,4 +1,4 @@
-import { checkAnswer, hint, type Lang } from '../../shared/lang';
+import { checkAnswer, hint, sharesAlternative, type Lang } from '../../shared/lang';
 import type { AnswerResult, QuizCard, QuizDirection } from '../../shared/types';
 import { api } from '../api';
 import { h, trackImeEnter } from '../dom';
@@ -139,12 +139,21 @@ export function renderPractice(root: HTMLElement): () => void {
       const expected = toKo ? card.entry.ko_text : card.entry.bg_text;
       let hintLevel = 0;
 
+      // Other entries with the same prompt (배 = круша / кораб / корем): typing one of
+      // those meanings is not a mistake, just a different card.
+      const promptNorm = toKo ? card.entry.bg_norm : card.entry.ko_norm;
+      const otherMeanings = store.entries.filter(
+        (e) => e.id !== card.entry.id && sharesAlternative(toKo ? e.bg_norm : e.ko_norm, promptNorm),
+      );
+      const otherText = (e: typeof card.entry) => (toKo ? e.ko_text : e.bg_text);
+
       const meta = [
         toKo ? POS_BG[card.entry.pos ?? ''] : null,
         toKo && card.entry.bg_gender ? `${card.entry.bg_gender}. р.` : null,
       ].filter(Boolean).join(', ');
 
       const hintLine = h('p', { class: 'hint', lang: answerLang, 'aria-live': 'polite' });
+      const otherNotice = h('p', { class: 'status', role: 'status' });
       const input = h('input', {
         class: 'answer',
         lang: answerLang,
@@ -160,13 +169,21 @@ export function renderPractice(root: HTMLElement): () => void {
       const giveUp = h('button', { type: 'button', onclick: () => reveal('wrong', null) }, "Don't know");
 
       const form = h('form', { class: 'answer-form' },
-        input, hintLine, h('div', { class: 'actions' }, checkBtn, hintBtn, giveUp),
+        input, hintLine, otherNotice, h('div', { class: 'actions' }, checkBtn, hintBtn, giveUp),
       );
       const imeEnter = trackImeEnter(form);
       form.addEventListener('submit', (e) => {
         e.preventDefault();
         if (imeEnter() || !input.value.trim()) return;
         const verdict = checkAnswer(input.value, expected, answerLang);
+        if (verdict.verdict !== 'correct') {
+          const other = otherMeanings.find((o) => checkAnswer(input.value, otherText(o), answerLang).verdict === 'correct');
+          if (other) {
+            otherNotice.textContent = `${otherText(other)} is another meaning of ${promptText}. This card asks for a different one — try again.`;
+            input.select();
+            return;
+          }
+        }
         if (verdict.verdict === 'correct') reveal(hintLevel ? 'hinted' : 'correct', null);
         else if (verdict.verdict === 'close') reveal(null, verdict.matched);
         else reveal('wrong', null);
@@ -205,6 +222,10 @@ export function renderPractice(root: HTMLElement): () => void {
           h('p', { lang: 'bg', class: 'bg' }, e.bg_text, e.bg_gender ? ` (${e.bg_gender}.)` : ''),
           closeTo && typed ? h('p', { class: 'typed' }, 'You wrote: ', h('span', { lang: answerLang }, typed)) : null,
           e.note ? h('p', { class: 'note' }, e.note) : null,
+          otherMeanings.length
+            ? h('p', { class: 'note' }, 'Other meanings: ',
+                h('span', { lang: answerLang }, otherMeanings.map(otherText).join(', ')))
+            : null,
           speakButton(e.ko_text, 'ko'),
         );
 
@@ -234,6 +255,7 @@ export function renderPractice(root: HTMLElement): () => void {
         h('p', { class: 'direction' }, DIRECTION_LABELS[card.direction]),
         h('p', { class: 'prompt', lang: promptLang }, promptText),
         meta ? h('p', { class: 'meta', lang: 'bg' }, meta) : null,
+        otherMeanings.length ? h('p', { class: 'meta' }, `One of ${otherMeanings.length + 1} meanings in your list`) : null,
         !toKo ? speakButton(card.entry.ko_text, 'ko') : null,
         form,
       ));

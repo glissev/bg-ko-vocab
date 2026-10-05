@@ -89,9 +89,14 @@ The deploy job applies any new migrations, then publishes the site.
 - Bulgarian verbs in the 1st person singular, with aspect pairs as `казвам / кажа`.
   Korean verbs and adjectives in dictionary form (`말하다`).
 - Separate accepted alternatives with `;` — `감사합니다; 고마워요`. Either one counts as correct.
+- Homonyms are separate entries: `배 = круша`, `배 = кораб`, `배 = корем`. Only the exact same
+  pair is rejected as a duplicate. In practice, typing another meaning of the same word isn't
+  counted as wrong; the app tells you it's a different card and lets you try again.
 - Romanization is filled in automatically and can be edited.
 - Import: one pair per line as `къща = 집`, or paste spreadsheet rows (tab-separated):
-  Bulgarian, Korean, romanization, hanja, part of speech, note, tags.
+  Bulgarian, Korean, romanization, hanja, part of speech, note, tags. Part of speech can be
+  written in English, Bulgarian or Korean (`noun`, `същ.`, `명사`); unrecognized labels are
+  left empty and listed after the import.
 
 ## How practice works
 

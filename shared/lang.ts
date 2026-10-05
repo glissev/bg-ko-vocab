@@ -1,4 +1,5 @@
 import { romanize } from 'es-hangul';
+import type { PartOfSpeech } from './types';
 
 export type Lang = 'bg' | 'ko';
 
@@ -74,6 +75,15 @@ export function suggestRomanization(koText: string): string {
     })
     .filter(Boolean)
     .join('; ');
+}
+
+/**
+ * True when two normalized columns (bg_norm or ko_norm) share any alternative,
+ * e.g. the ko_norm of 배 = круша and 배 = кораб.
+ */
+export function sharesAlternative(aNorm: string, bNorm: string): boolean {
+  const a = new Set(aNorm.split('|'));
+  return bNorm.split('|').some((alt) => a.has(alt));
 }
 
 /** Columns the server stores alongside the user's text. */
@@ -170,4 +180,27 @@ export function hint(expected: string, lang: Lang, level: 1 | 2): string {
     })
     .join(' ')
     .replace(/ {3,}/g, '   ');
+}
+
+// ---------------------------------------------------------------------------
+// Part of speech from imported spreadsheets
+// ---------------------------------------------------------------------------
+
+const POS_ALIASES: Record<string, PartOfSpeech> = {
+  noun: 'noun', n: 'noun', съществително: 'noun', същ: 'noun', съществ: 'noun', 명사: 'noun',
+  verb: 'verb', v: 'verb', глагол: 'verb', гл: 'verb', 동사: 'verb',
+  adjective: 'adjective', adj: 'adjective', прилагателно: 'adjective', прил: 'adjective', 형용사: 'adjective',
+  adverb: 'adverb', adv: 'adverb', наречие: 'adverb', нар: 'adverb', 부사: 'adverb',
+  phrase: 'phrase', expression: 'phrase', израз: 'phrase', фраза: 'phrase', 표현: 'phrase',
+  other: 'other', друго: 'other', 기타: 'other',
+};
+
+/**
+ * Accepts English, Bulgarian or Korean labels and common abbreviations
+ * ('Noun', 'същ.', '동사'). Returns null for empty or unrecognized input.
+ */
+export function parsePos(raw: string | null | undefined): PartOfSpeech | null {
+  if (!raw) return null;
+  const key = raw.trim().toLocaleLowerCase('bg').replace(/\.$/, '');
+  return POS_ALIASES[key] ?? null;
 }
